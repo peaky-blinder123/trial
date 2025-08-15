@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from pyzbar.pyzbar import decode
+# The 'pyzbar' import has been removed as it's no longer needed.
 import requests
 import threading
 import time
@@ -18,7 +18,7 @@ log.setLevel(logging.ERROR)
 app = Flask(__name__)
 
 # =============================================================================
-# CORE ATTENDANCE LOGIC (This section is unchanged)
+# CORE ATTENDANCE LOGIC
 # =============================================================================
 
 def login_and_get_cookie(username, password, output_log):
@@ -44,16 +44,35 @@ def login_and_get_cookie(username, password, output_log):
         output_log.append(f"❌ [{username}] Login request failed: {e}")
         return None
 
+# --- MODIFIED FUNCTION ---
+# This function now uses OpenCV's built-in QR Code detector instead of pyzbar.
 def decode_qr_from_data(image_data):
-    # This function remains the same
+    """
+    Decodes a QR code from raw image data using cv2.QRCodeDetector.
+    """
     nparr = np.frombuffer(image_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Could not decode image data.")
-    codes = decode(img)
-    if not codes:
-        raise ValueError("No QR code found in the image!")
-    return codes[0].data.decode("utf-8")
+
+    # Initialize OpenCV's QR Code detector
+    detector = cv2.QRCodeDetector()
+
+    # Detect and decode the QR code
+    decoded_text, points, _ = detector.detectAndDecode(img)
+
+    # Check if a QR code was found and decoded
+    if points is not None and decoded_text:
+        return decoded_text
+    else:
+        # As a fallback, try again with a grayscale version, which can sometimes improve detection
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        decoded_text, points, _ = detector.detectAndDecode(gray_img)
+        if points is not None and decoded_text:
+            return decoded_text
+        else:
+            raise ValueError("No QR code found or could not be decoded!")
+
 
 def mark_attendance(username, attendance_id, stu_id, cookie_str, output_log):
     # This function remains the same
@@ -120,7 +139,7 @@ def parse_logs_for_table(logs, students):
                         result_entry["status"] = "Error"
                         result_entry["response"] = "Could not parse server response."
                     break
-        results.append(result_entry)
+    results.append(result_entry)
     return results
 
 
@@ -148,7 +167,7 @@ def run_attendance_for_all(attendance_id, students):
     return {"logs": output_log, "table_data": table_data}
 
 # =============================================================================
-# FLASK WEB SERVER ROUTES
+# FLASK WEB SERVER ROUTES (Unchanged)
 # =============================================================================
 
 HTML_TEMPLATE = """
@@ -186,15 +205,12 @@ HTML_TEMPLATE = """
         .status { font-weight: bold; padding: 5px 8px; border-radius: 5px; color: white; display: inline-block; }
         .status-success { background-color: var(--success-color); }
         .status-failed { background-color: var(--error-color); }
-
-        /* --- NEW: MOBILE RESPONSIVE STYLES --- */
         @media (max-width: 768px) {
             body { padding-top: 1rem; }
             .container { padding: 1.5rem; }
             .flex-container { flex-direction: column; }
             h1 { font-size: 1.8rem; }
             
-            /* Responsive Table Styling */
             #student-list-table thead, #results-table thead { display: none; }
             #student-list-table, #student-list-table tbody, #student-list-table tr, #student-list-table td,
             #results-table, #results-table tbody, #results-table tr, #results-table td {
@@ -333,7 +349,6 @@ HTML_TEMPLATE = """
         function renderStudentList() {
             studentListBody.innerHTML = '';
             students.forEach((student, index) => {
-                // *** MODIFIED: Added data-label attributes for mobile view ***
                 const row = `<tr>
                     <td data-label="Email">${student.email}</td>
                     <td data-label="Action"><button onclick="deleteStudent(${index})" style="background:var(--error-color); color:white; border:none; padding: 5px 10px; border-radius:5px; cursor:pointer;">Delete</button></td>
@@ -494,7 +509,6 @@ HTML_TEMPLATE = """
                 resultsTableBody.innerHTML = '';
                 result.table_data.forEach(item => {
                     const statusClass = item.status === 'Success' ? 'status-success' : 'status-failed';
-                    // *** MODIFIED: Added data-label attributes for mobile view ***
                     const row = `<tr>
                         <td data-label="Email">${item.email}</td>
                         <td data-label="Status"><span class="status ${statusClass}">${item.status}</span></td>
