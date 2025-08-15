@@ -1,0 +1,16 @@
+# Python virtual environment
+venv/
+env/
+*.pyc
+__pycache__/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE configuration files
+.vscode/
+.idea/
+
+# CRITICAL: Never commit credentials files
+credentials.json

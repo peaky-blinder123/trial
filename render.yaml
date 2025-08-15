@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: attendance-automator
+    env: python
+    plan: free # or your desired plan
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      apt-get update && apt-get install -y libzbar0 libgl1
+    startCommand: "gunicorn app:app"

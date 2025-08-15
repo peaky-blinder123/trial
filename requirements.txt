@@ -1,0 +1,6 @@
+Flask
+gunicorn
+requests
+numpy
+opencv-python-headless
+pyzbar
