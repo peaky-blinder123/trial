@@ -3,8 +3,8 @@ services:
     name: attendance-automator
     env: python
     plan: free
-    # Use preBuildCommand for system dependencies
+    # Pre-build command for system dependencies
     preBuildCommand: "apt-get update && apt-get install -y libzbar0 libgl1"
-    # buildCommand is now only for Python packages
+    # Build command for Python packages
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
