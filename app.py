@@ -1,13 +1,10 @@
-import cv2
-import numpy as np
-# The 'pyzbar' import has been removed as it's no longer needed.
 import requests
 import threading
 import time
 import random
 import json
 import base64
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
 import logging
 import re
 
@@ -16,13 +13,17 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
+# A secret key is required for session management
+app.secret_key = 'your_very_secret_and_random_key_12345'
+
+# The required password to access the application
+APP_PASSWORD = "a123b321"
 
 # =============================================================================
-# CORE ATTENDANCE LOGIC
+# CORE ATTENDANCE LOGIC (Unchanged)
 # =============================================================================
 
 def login_and_get_cookie(username, password, output_log):
-    # This function remains the same
     url = "https://student.bennetterp.camu.in/login/validate"
     headers = {
         "Content-Type": "application/json", "Origin": "https://student.bennetterp.camu.in",
@@ -44,38 +45,24 @@ def login_and_get_cookie(username, password, output_log):
         output_log.append(f"❌ [{username}] Login request failed: {e}")
         return None
 
-# --- MODIFIED FUNCTION ---
-# This function now uses OpenCV's built-in QR Code detector instead of pyzbar.
 def decode_qr_from_data(image_data):
-    """
-    Decodes a QR code from raw image data using cv2.QRCodeDetector.
-    """
-    nparr = np.frombuffer(image_data, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image data.")
-
-    # Initialize OpenCV's QR Code detector
-    detector = cv2.QRCodeDetector()
-
-    # Detect and decode the QR code
-    decoded_text, points, _ = detector.detectAndDecode(img)
-
-    # Check if a QR code was found and decoded
-    if points is not None and decoded_text:
-        return decoded_text
-    else:
-        # As a fallback, try again with a grayscale version, which can sometimes improve detection
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        decoded_text, points, _ = detector.detectAndDecode(gray_img)
-        if points is not None and decoded_text:
-            return decoded_text
+    api_url = "https://api.qrserver.com/v1/read-qr-code/"
+    files = {'file': ('qr_code.png', image_data, 'image/png')}
+    try:
+        response = requests.post(api_url, files=files, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+        if result and result[0]['symbol'][0]['data']:
+            return result[0]['symbol'][0]['data']
         else:
-            raise ValueError("No QR code found or could not be decoded!")
-
+            error_message = result[0]['symbol'][0].get('error', 'No QR code data found in API response.')
+            raise ValueError(f"QR code decoding failed: {error_message}")
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"API request to qrserver.com failed: {e}")
+    except (IndexError, KeyError, TypeError):
+        raise ValueError("Could not parse the QR code from the API response.")
 
 def mark_attendance(username, attendance_id, stu_id, cookie_str, output_log):
-    # This function remains the same
     url = "https://student.bennetterp.camu.in/api/Attendance/record-online-attendance"
     headers = {
         "Accept": "application/json, text/plain, */*", "Content-Type": "application/json",
@@ -91,29 +78,23 @@ def mark_attendance(username, attendance_id, stu_id, cookie_str, output_log):
         output_log.append(f"❌ [{username}] Attendance request failed: {e}")
 
 def process_student(student_info, attendance_id, output_log):
-    # This function remains the same
     email = student_info.get("email")
     password = student_info.get("password")
     stu_id = student_info.get("stu_id")
     if not all([email, password, stu_id]):
         output_log.append(f"⚠️ Skipping invalid student entry.")
         return
-        
     output_log.append(f"[*] Starting process for: {email}")
     session_cookie = login_and_get_cookie(email, password, output_log)
     if session_cookie:
         mark_attendance(email, attendance_id, stu_id, session_cookie, output_log)
 
 def parse_logs_for_table(logs, students):
-    # This function remains the same
     results = []
     student_emails = [s.get("email") for s in students]
-
     for email in student_emails:
         if not email: continue
-        
         result_entry = {"email": email, "status": "Pending", "response": "No response recorded."}
-        
         for log in reversed(logs):
             if f"[{email}]" in log:
                 if "Login failed" in log or "request failed" in log:
@@ -123,419 +104,82 @@ def parse_logs_for_table(logs, students):
                 elif "Status:" in log:
                     try:
                         parts = log.split('|')
-                        status_part = parts[0]
-                        response_part = parts[1]
-                        
-                        http_status = re.search(r'Status: (\d+)', status_part).group(1)
-                        response_json = json.loads(response_part.replace("Response:", "").strip())
-                        
+                        http_status = re.search(r'Status: (\d+)', parts[0]).group(1)
+                        response_json = json.loads(parts[1].replace("Response:", "").strip())
                         if http_status == '200' and response_json.get('status') == 'success':
                             result_entry["status"] = "Success"
                         else:
                             result_entry["status"] = "Failed"
-                        
                         result_entry["response"] = response_json.get('message', 'No message.')
                     except (IndexError, AttributeError, json.JSONDecodeError):
                         result_entry["status"] = "Error"
                         result_entry["response"] = "Could not parse server response."
                     break
-    results.append(result_entry)
+        results.append(result_entry)
     return results
 
-
 def run_attendance_for_all(attendance_id, students):
-    # This function remains the same
     output_log = []
-    
     if not students or not isinstance(students, list):
         return {"logs": ["❌ FATAL ERROR: No student data provided."], "table_data": []}
-
     output_log.append(f"🚀 Starting attendance process for {len(students)} student(s)...\n")
-    
     threads = []
     for student in students:
         thread = threading.Thread(target=process_student, args=(student, attendance_id, output_log))
         threads.append(thread)
         thread.start()
         time.sleep(random.uniform(0.5, 0.9))
-        
     for thread in threads:
         thread.join()
-        
     table_data = parse_logs_for_table(output_log, students)
-    
     return {"logs": output_log, "table_data": table_data}
 
 # =============================================================================
-# FLASK WEB SERVER ROUTES (Unchanged)
+# TEMPLATES (Unchanged)
 # =============================================================================
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attendance Automator</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-    <style>
-        :root { --primary-color: #4a90e2; --secondary-color: #50e3c2; --bg-color: #f4f7f6; --card-bg: #ffffff; --text-color: #333; --shadow: 0 10px 30px rgba(0,0,0,0.1); --success-color: #28a745; --error-color: #dc3545; }
-        body { font-family: 'Poppins', sans-serif; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%); margin: 1rem; padding-top: 2rem; }
-        .container { background: var(--card-bg); padding: 2.5rem; border-radius: 20px; box-shadow: var(--shadow); text-align: center; max-width: 900px; width: 100%; transition: all 0.3s ease; }
-        h1, h2, h3 { color: var(--text-color); margin-bottom: 0.5rem; }
-        p.subtitle { color: #888; margin-top: 0; margin-bottom: 2rem; }
-        .button { background-image: linear-gradient(45deg, var(--primary-color) 0%, var(--secondary-color) 100%); color: white; border: none; padding: 12px 24px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.3s; margin: 0.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        .button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
-        .button-secondary { background-image: none; background-color: #eee; color: #555; }
-        .button:disabled { background-image: none; background-color: #cccccc; cursor: not-allowed; transform: none; box-shadow: none; }
-        .hidden { display: none; }
-        .flex-container { display: flex; justify-content: space-between; gap: 2rem; margin-top: 2rem; flex-wrap: wrap; }
-        .panel { flex: 1; min-width: 300px; text-align: left;}
-        #student-manager-panel, #process-panel { border: 1px solid #eee; padding: 1.5rem; border-radius: 12px; }
-        .input-group { margin-bottom: 1rem; }
-        .input-group label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
-        input[type="text"], input[type="password"] { width: calc(100% - 24px); padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
-        #decoded-id { background: #eef; padding: 10px; border-radius: 8px; font-weight: 600; color: var(--primary-color); word-wrap: break-word; margin: 1rem 0; }
-        #results-log { margin-top: 1rem; text-align: left; background: #2d2d2d; color: #f1f1f1; border-radius: 8px; padding: 1rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; font-size: 14px; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #student-list-table, #results-table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; font-size: 14px; }
-        #student-list-table th, #student-list-table td, #results-table th, #results-table td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-        #student-list-table th, #results-table th { background-color: #f2f2f2; font-weight: 600; }
-        .status { font-weight: bold; padding: 5px 8px; border-radius: 5px; color: white; display: inline-block; }
-        .status-success { background-color: var(--success-color); }
-        .status-failed { background-color: var(--error-color); }
-        @media (max-width: 768px) {
-            body { padding-top: 1rem; }
-            .container { padding: 1.5rem; }
-            .flex-container { flex-direction: column; }
-            h1 { font-size: 1.8rem; }
-            
-            #student-list-table thead, #results-table thead { display: none; }
-            #student-list-table, #student-list-table tbody, #student-list-table tr, #student-list-table td,
-            #results-table, #results-table tbody, #results-table tr, #results-table td {
-                display: block;
-                width: 100%;
-                box-sizing: border-box;
-            }
-            #student-list-table tr, #results-table tr {
-                margin-bottom: 15px;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            #student-list-table td, #results-table td {
-                text-align: right;
-                padding-left: 50%;
-                position: relative;
-                border: none;
-                border-bottom: 1px solid #eee;
-            }
-            #student-list-table td:before, #results-table td:before {
-                content: attr(data-label);
-                position: absolute;
-                left: 10px;
-                width: 45%;
-                padding-right: 10px;
-                white-space: nowrap;
-                text-align: left;
-                font-weight: bold;
-            }
-            #student-list-table td:last-child, #results-table td:last-child { border-bottom: 0; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Attendance Automator</h1>
-        <p class="subtitle">Manage your student list, then scan a QR code to mark attendance for everyone.</p>
-
-        <div class="flex-container">
-            <div class="panel" id="student-manager-panel">
-                <h2>Student List</h2>
-                <p style="font-size: 12px; color: #777;">Your list is saved in your browser. Max 10 students.</p>
-                <form id="add-student-form">
-                    <div class="input-group">
-                        <label for="email">Email</label>
-                        <input type="text" id="email" required>
-                    </div>
-                    <div class="input-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" required>
-                    </div>
-                    <div class="input-group">
-                        <label for="stu_id">Student ID</label>
-                        <input type="text" id="stu_id" required>
-                    </div>
-                    <button type="submit" class="button">Add Student</button>
-                </form>
-                <hr style="margin: 1.5rem 0;">
-                <table id="student-list-table">
-                    <thead><tr><th>Email</th><th>Action</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-                <div style="margin-top: 1rem;">
-                    <label for="json-upload" class="button button-secondary">Upload credentials.json</label>
-                    <input type="file" id="json-upload" accept=".json" class="hidden">
-                </div>
-            </div>
-
-            <div class="panel" id="process-panel">
-                <div id="initial-view">
-                    <h2>Step 1: Get Attendance ID</h2>
-                    <button class="button" id="start-camera-btn">Use Camera</button>
-                    <div class="input-group" style="margin-top: 1rem;">
-                        <input type="text" id="qr-text-input" placeholder="Or paste QR text here...">
-                        <button class="button" id="submit-text-btn">Use Text</button>
-                    </div>
-                </div>
-                <div id="camera-view" class="hidden">
-                    <video id="video" autoplay playsinline style="width:100%; border-radius:8px;"></video>
-                    <button class="button" id="capture-btn">Capture QR</button>
-                </div>
-                <div id="confirm-view" class="hidden">
-                    <h2>Step 2: Confirm & Run</h2>
-                    <p><strong>Attendance ID:</strong></p>
-                    <div id="decoded-id"></div>
-                    <button class="button" id="mark-attendance-btn">Confirm & Mark Attendance</button>
-                </div>
-                <div id="results-view" class="hidden">
-                    <h2>Process Complete</h2>
-                    <div id="results-loader" class="loader"></div>
-                    <div id="results-content" class="hidden">
-                        <h3>Results Summary</h3>
-                        <table id="results-table">
-                            <thead><tr><th>Email</th><th>Status</th><th>Response</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
-                        <h3>Raw Log</h3>
-                        <div id="results-log"></div>
-                        <button class="button" onclick="location.reload()">Run Again</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // DOM Elements
-        const addStudentForm = document.getElementById('add-student-form');
-        const studentListBody = document.querySelector('#student-list-table tbody');
-        const jsonUpload = document.getElementById('json-upload');
-        const initialView = document.getElementById('initial-view');
-        const cameraView = document.getElementById('camera-view');
-        const confirmView = document.getElementById('confirm-view');
-        const resultsView = document.getElementById('results-view');
-        const startCameraBtn = document.getElementById('start-camera-btn');
-        const captureBtn = document.getElementById('capture-btn');
-        const submitTextBtn = document.getElementById('submit-text-btn');
-        const markAttendanceBtn = document.getElementById('mark-attendance-btn');
-        const video = document.getElementById('video');
-        const qrTextInput = document.getElementById('qr-text-input');
-        const decodedIdDiv = document.getElementById('decoded-id');
-        const resultsLogDiv = document.getElementById('results-log');
-        const resultsLoader = document.getElementById('results-loader');
-        const resultsContent = document.getElementById('results-content');
-        const resultsTableBody = document.querySelector('#results-table tbody');
-
-        let students = [];
-        let decodedAttendanceId = null;
-
-        // --- Student Management Logic ---
-        function saveStudents() {
-            localStorage.setItem('studentList', JSON.stringify(students));
-        }
-
-        function renderStudentList() {
-            studentListBody.innerHTML = '';
-            students.forEach((student, index) => {
-                const row = `<tr>
-                    <td data-label="Email">${student.email}</td>
-                    <td data-label="Action"><button onclick="deleteStudent(${index})" style="background:var(--error-color); color:white; border:none; padding: 5px 10px; border-radius:5px; cursor:pointer;">Delete</button></td>
-                </tr>`;
-                studentListBody.innerHTML += row;
-            });
-        }
-
-        function addStudent(email, password, stu_id) {
-            if (students.length >= 10) {
-                alert("You can only add up to 10 students.");
-                return;
-            }
-            if (students.some(s => s.email === email)) {
-                alert("This email is already in the list.");
-                return;
-            }
-            students.push({ email, password, stu_id });
-            saveStudents();
-            renderStudentList();
-        }
-
-        function deleteStudent(index) {
-            students.splice(index, 1);
-            saveStudents();
-            renderStudentList();
-        }
-
-        addStudentForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const stu_id = document.getElementById('stu_id').value;
-            addStudent(email, password, stu_id);
-            addStudentForm.reset();
-        });
-
-        jsonUpload.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    if (!data.students || !Array.isArray(data.students)) {
-                        throw new Error("Invalid JSON format. Expected an object with a 'students' array.");
-                    }
-                    students = data.students.slice(0, 10); // Limit to 10
-                    saveStudents();
-                    renderStudentList();
-                    alert(`${students.length} students loaded successfully from file!`);
-                } catch (err) {
-                    alert(`Error reading file: ${err.message}`);
-                }
-            };
-            reader.readAsText(file);
-        });
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const savedStudents = localStorage.getItem('studentList');
-            if (savedStudents) {
-                students = JSON.parse(savedStudents);
-                renderStudentList();
-            }
-        });
-        
-        // --- Attendance Process Logic ---
-        startCameraBtn.addEventListener('click', startCamera);
-        captureBtn.addEventListener('click', captureImage);
-        submitTextBtn.addEventListener('click', usePastedText);
-        markAttendanceBtn.addEventListener('click', runAttendanceProcess);
-        
-        function showView(viewToShow) {
-            [initialView, cameraView, confirmView, resultsView].forEach(view => view.classList.add('hidden'));
-            viewToShow.classList.remove('hidden');
-        }
-
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                video.srcObject = stream;
-                video.onloadedmetadata = () => showView(cameraView);
-            } catch (err) {
-                alert("Could not access camera. Please grant permission.");
-            }
-        }
-
-        function captureImage() {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-            video.srcObject.getTracks().forEach(track => track.stop());
-            
-            showView(resultsView);
-            resultsContent.classList.add('hidden');
-            resultsLoader.classList.remove('hidden');
-            
-            const imageData = canvas.toDataURL('image/png');
-            decodeImageOnServer(imageData);
-        }
-
-        async function decodeImageOnServer(imageData) {
-            try {
-                const response = await fetch('/decode-qr', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: imageData })
-                });
-                const result = await response.json();
-                if (result.error) throw new Error(result.error);
-                
-                decodedAttendanceId = result.attendance_id;
-                showConfirmationScreen();
-            } catch (error) {
-                resultsLogDiv.textContent = `Error decoding QR: ${error.message}`;
-            }
-        }
-
-        function usePastedText() {
-            const text = qrTextInput.value.trim();
-            if (!text) {
-                alert('Please paste the QR code text.');
-                return;
-            }
-            decodedAttendanceId = text;
-            showConfirmationScreen();
-        }
-
-        function showConfirmationScreen() {
-            if (students.length === 0) {
-                alert("Please add at least one student to your list before marking attendance.");
-                return;
-            }
-            showView(confirmView);
-            decodedIdDiv.textContent = decodedAttendanceId;
-        }
-
-        async function runAttendanceProcess() {
-            showView(resultsView);
-            resultsLoader.classList.remove('hidden');
-            resultsContent.classList.add('hidden');
-
-            try {
-                const response = await fetch('/mark-attendance', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        attendance_id: decodedAttendanceId,
-                        students: students
-                    })
-                });
-                const result = await response.json();
-                
-                resultsLoader.classList.add('hidden');
-                resultsContent.classList.remove('hidden');
-
-                resultsTableBody.innerHTML = '';
-                result.table_data.forEach(item => {
-                    const statusClass = item.status === 'Success' ? 'status-success' : 'status-failed';
-                    const row = `<tr>
-                        <td data-label="Email">${item.email}</td>
-                        <td data-label="Status"><span class="status ${statusClass}">${item.status}</span></td>
-                        <td data-label="Response">${item.response}</td>
-                    </tr>`;
-                    resultsTableBody.innerHTML += row;
-                });
-                
-                resultsLogDiv.textContent = result.logs.join('\\n');
-
-            } catch (error) {
-                resultsLoader.classList.add('hidden');
-                resultsContent.classList.remove('hidden');
-                resultsLogDiv.textContent = `An error occurred: ${error.message}`;
-            }
-        }
-    </script>
-</body>
-</html>
+LOGIN_TEMPLATE = """
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Login - Attendance Automator</title><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"><style>body{font-family:'Poppins',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background-image:linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);margin:0}.login-container{background:#fff;padding:2.5rem;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.1);text-align:center;max-width:400px;width:90%}h1{color:#333}.error{color:#dc3545;background:#f8d7da;border:1px solid #f5c6cb;padding:10px;border-radius:8px;margin-bottom:1rem}input[type=password]{width:calc(100% - 24px);padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px;margin-bottom:1rem}.button{background-image:linear-gradient(45deg, #4a90e2 0%, #50e3c2 100%);color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s}.button:hover{transform:translateY(-2px)}</style></head><body><div class="login-container"><h1>Enter Password</h1>{% if error %}<p class="error">{{ error }}</p>{% endif %}<form method="post"><input type="password" name="password" placeholder="Password" required autofocus><button type="submit" class="button">Login</button></form></div></body></html>
 """
+
+HTML_TEMPLATE = """
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Attendance Automator</title><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"><style>:root{--primary-color:#4a90e2;--secondary-color:#50e3c2;--bg-color:#f4f7f6;--card-bg:#fff;--text-color:#333;--shadow:0 10px 30px rgba(0,0,0,.1);--success-color:#28a745;--error-color:#dc3545}body{font-family:'Poppins',sans-serif;display:flex;align-items:flex-start;justify-content:center;min-height:100vh;background-image:linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);margin:1rem;padding-top:2rem}.container{background:var(--card-bg);padding:2.5rem;border-radius:20px;box-shadow:var(--shadow);text-align:center;max-width:900px;width:100%;transition:all .3s ease}h1,h2,h3{color:var(--text-color);margin-bottom:.5rem}p.subtitle{color:#888;margin-top:0;margin-bottom:2rem}.button{background-image:linear-gradient(45deg, var(--primary-color) 0%, var(--secondary-color) 100%);color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s;margin:.5rem;box-shadow:0 4px 15px rgba(0,0,0,.2);display:inline-block;text-align:center}.button:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.25)}.button-secondary{background-image:none;background-color:#eee;color:#555}.hidden{display:none}.flex-container{display:flex;justify-content:space-between;gap:2rem;margin-top:2rem;flex-wrap:wrap}.panel{flex:1;min-width:300px;text-align:left}#student-manager-panel,#process-panel{border:1px solid #eee;padding:1.5rem;border-radius:12px}.input-group{margin-bottom:1rem}.input-group label{display:block;margin-bottom:5px;font-weight:600;font-size:14px}input[type=text],input[type=password]{width:calc(100% - 24px);padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px}#decoded-id{background:#eef;padding:10px;border-radius:8px;font-weight:600;color:var(--primary-color);word-wrap:break-word;margin:1rem 0}#results-log{margin-top:1rem;text-align:left;background:#2d2d2d;color:#f1f1f1;border-radius:8px;padding:1rem;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-wrap:break-word;font-family:'Courier New',Courier,monospace;font-size:14px}.loader{border:4px solid #f3f3f3;border-top:4px solid var(--primary-color);border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:20px auto}@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}#student-list-table,#results-table{border-collapse:collapse;width:100%;margin-top:1.5rem;font-size:14px}#student-list-table th,#student-list-table td,#results-table th,#results-table td{border:1px solid #ddd;padding:10px;text-align:left}#student-list-table th,#results-table th{background-color:#f2f2f2;font-weight:600}.status{font-weight:700;padding:5px 8px;border-radius:5px;color:#fff;display:inline-block}.status-success{background-color:var(--success-color)}.status-failed{background-color:var(--error-color)}.options-grid{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-bottom:1rem}@media (max-width:768px){body{padding-top:1rem}.container{padding:1.5rem}.flex-container{flex-direction:column}h1{font-size:1.8rem}#student-list-table thead,#results-table thead{display:none}#student-list-table,#student-list-table tbody,#student-list-table tr,#student-list-table td,#results-table,#results-table tbody,#results-table tr,#results-table td{display:block;width:100%;box-sizing:border-box}#student-list-table tr,#results-table tr{margin-bottom:15px;border:1px solid #ddd;border-radius:8px;padding:5px}#student-list-table td,#results-table td{text-align:right;padding-left:50%;position:relative;border:none;border-bottom:1px solid #eee}#student-list-table td:before,#results-table td:before{content:attr(data-label);position:absolute;left:10px;width:45%;padding-right:10px;white-space:nowrap;text-align:left;font-weight:700}#student-list-table td:last-child,#results-table td:last-child{border-bottom:0}}</style></head><body><div class="container"><h1>Attendance Automator</h1><p class="subtitle">Manage your student list, then scan a QR code to mark attendance for everyone.</p><div class="flex-container"><div class="panel" id="student-manager-panel"><h2>Student List</h2><p style="font-size:12px;color:#777">Your list is saved in your browser. Max 10 students.</p><form id="add-student-form"><div class="input-group"><label for="email">Email</label><input type="text" id="email" required></div><div class="input-group"><label for="password">Password</label><input type="password" id="password" required></div><div class="input-group"><label for="stu_id">Student ID</label><input type="text" id="stu_id" required></div><button type="submit" class="button">Add Student</button></form><hr style="margin:1.5rem 0"><table id="student-list-table"><thead><tr><th>Email</th><th>Action</th></tr></thead><tbody></tbody></table><div style="margin-top:1rem"><label for="json-upload" class="button button-secondary">Upload credentials.json</label><input type="file" id="json-upload" accept=".json" class="hidden"></div></div><div class="panel" id="process-panel"><div id="initial-view"><h2>Step 1: Get Attendance ID</h2><div class="options-grid"><button class="button" id="start-camera-btn">Use Camera</button><label for="qr-upload" class="button">Upload Image</label><input type="file" id="qr-upload" accept="image/*" class="hidden"></div><div class="input-group" style="margin-top:1rem"><input type="text" id="qr-text-input" placeholder="Or paste QR text here..."><button class="button" id="submit-text-btn">Use Text</button></div></div><div id="camera-view" class="hidden"><video id="video" autoplay playsinline style="width:100%;border-radius:8px"></video><button class="button" id="capture-btn">Capture QR</button></div><div id="confirm-view" class="hidden"><h2>Step 2: Confirm & Run</h2><p><strong>Attendance ID:</strong></p><div id="decoded-id"></div><button class="button" id="mark-attendance-btn">Confirm & Mark Attendance</button></div><div id="results-view" class="hidden"><h2>Process Complete</h2><div id="results-loader" class="loader"></div><div id="results-content" class="hidden"><h3>Results Summary</h3><div style="max-height:250px;overflow-y:auto;border:1px solid #ddd;border-radius:8px;margin-bottom:1rem"><table id="results-table"><thead><tr><th>Email</th><th>Status</th><th>Response</th></tr></thead><tbody></tbody></table></div><h3>Raw Log</h3><div id="results-log"></div><button class="button" onclick="location.reload()">Run Again</button></div></div></div></div></div><script>const addStudentForm=document.getElementById("add-student-form"),studentListBody=document.querySelector("#student-list-table tbody"),jsonUpload=document.getElementById("json-upload"),initialView=document.getElementById("initial-view"),cameraView=document.getElementById("camera-view"),confirmView=document.getElementById("confirm-view"),resultsView=document.getElementById("results-view"),startCameraBtn=document.getElementById("start-camera-btn"),qrUploadInput=document.getElementById("qr-upload"),captureBtn=document.getElementById("capture-btn"),submitTextBtn=document.getElementById("submit-text-btn"),markAttendanceBtn=document.getElementById("mark-attendance-btn"),video=document.getElementById("video"),qrTextInput=document.getElementById("qr-text-input"),decodedIdDiv=document.getElementById("decoded-id"),resultsLogDiv=document.getElementById("results-log"),resultsLoader=document.getElementById("results-loader"),resultsContent=document.getElementById("results-content"),resultsTableBody=document.querySelector("#results-table tbody");let students=[],decodedAttendanceId=null;function saveStudents(){localStorage.setItem("studentList",JSON.stringify(students))}function renderStudentList(){studentListBody.innerHTML="";students.forEach((e,t)=>{const n=`<tr>\n                    <td data-label="Email">${e.email}</td>\n                    <td data-label="Action"><button onclick="deleteStudent(${t})" style="background:var(--error-color); color:white; border:none; padding: 5px 10px; border-radius:5px; cursor:pointer;">Delete</button></td>\n                </tr>`;studentListBody.innerHTML+=n})}function addStudent(e,t,n){students.length>=10?alert("You can only add up to 10 students."):students.some(t=>t.email===e)?alert("This email is already in the list."):(students.push({email:e,password:t,stu_id:n}),saveStudents(),renderStudentList())}function deleteStudent(e){students.splice(e,1);saveStudents();renderStudentList()}addStudentForm.addEventListener("submit",e=>{e.preventDefault();const t=document.getElementById("email").value,n=document.getElementById("password").value,d=document.getElementById("stu_id").value;addStudent(t,n,d);addStudentForm.reset()});jsonUpload.addEventListener("change",e=>{const t=e.target.files[0];if(!t)return;const n=new FileReader;n.onload=e=>{try{const t=JSON.parse(e.target.result);if(!t.students||!Array.isArray(t.students))throw new Error("Invalid JSON format.");students=t.students.slice(0,10),saveStudents(),renderStudentList(),alert(`${students.length} students loaded successfully!`)}catch(t){alert(`Error reading file: ${t.message}`)}};n.readAsText(t)});document.addEventListener("DOMContentLoaded",()=>{const e=localStorage.getItem("studentList");e&&(students=JSON.parse(e),renderStudentList())});startCameraBtn.addEventListener("click",startCamera);qrUploadInput.addEventListener("change",handleFileUpload);captureBtn.addEventListener("click",captureImage);submitTextBtn.addEventListener("click",usePastedText);markAttendanceBtn.addEventListener("click",runAttendanceProcess);function showView(e){[initialView,cameraView,confirmView,resultsView].forEach(t=>t.classList.add("hidden"));e.classList.remove("hidden")}async function startCamera(){try{const e=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});video.srcObject=e;video.onloadedmetadata=()=>showView(cameraView)}catch(e){alert("Could not access camera. Please grant permission.")}}function handleFileUpload(e){const t=e.target.files[0];if(t){if(!t.type.startsWith("image/")){alert("Please upload a valid image file.");return}const e=new FileReader;e.onload=e=>{const t=e.target.result;showView(resultsView);resultsContent.classList.add("hidden");resultsLoader.classList.remove("hidden");resultsLogDiv.textContent="Decoding uploaded QR code via API...";decodeImageOnServer(t)};e.onerror=()=>{alert("Error reading file.")};e.readAsDataURL(t)}}function captureImage(){const e=document.createElement("canvas");e.width=video.videoWidth,e.height=video.videoHeight;e.getContext("2d").drawImage(video,0,0,e.width,e.height);video.srcObject.getTracks().forEach(e=>e.stop());showView(resultsView);resultsContent.classList.add("hidden");resultsLoader.classList.remove("hidden");resultsLogDiv.textContent="Decoding QR code via API...";const t=e.toDataURL("image/png");decodeImageOnServer(t)}async function decodeImageOnServer(e){try{const t=await fetch("/decode-qr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:e})});if(!t.ok){const e=await t.json();throw new Error(e.error||`Server responded with status ${t.status}`)}const n=await t.json();if(n.error)throw new Error(n.error);decodedAttendanceId=n.attendance_id,showConfirmationScreen()}catch(e){resultsLoader.classList.add("hidden");resultsContent.classList.remove("hidden");resultsLogDiv.textContent=`Error decoding QR: ${e.message}`}}function usePastedText(){const e=qrTextInput.value.trim();e?(decodedAttendanceId=e,showConfirmationScreen()):alert("Please paste the QR code text.")}function showConfirmationScreen(){students.length===0?(alert("Please add at least one student before marking attendance."),location.reload()):(showView(confirmView),decodedIdDiv.textContent=decodedAttendanceId)}async function runAttendanceProcess(){showView(resultsView);resultsLoader.classList.remove("hidden");resultsContent.classList.add("hidden");try{const e=await fetch("/mark-attendance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({attendance_id:decodedAttendanceId,students:students})}),t=await e.json();resultsLoader.classList.add("hidden");resultsContent.classList.remove("hidden");resultsTableBody.innerHTML="";t.table_data.forEach(e=>{const t="Success"===e.status?"status-success":"status-failed",n=`<tr>\n                        <td data-label="Email">${e.email}</td>\n                        <td data-label="Status"><span class="status ${t}">${e.status}</span></td>\n                        <td data-label="Response">${e.response}</td>\n                    </tr>`;resultsTableBody.innerHTML+=n});resultsLogDiv.textContent=t.logs.join("\\n")}catch(e){resultsLoader.classList.add("hidden");resultsContent.classList.remove("hidden");resultsLogDiv.textContent=`An error occurred: ${e.message}`}}</script></body></html>
+"""
+
+# =============================================================================
+# FLASK WEB SERVER ROUTES (Logic Modified for Temporary Session)
+# =============================================================================
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        if request.form.get('password') == APP_PASSWORD:
+            # Set a one-time flag that indicates a successful login attempt.
+            session['is_newly_authenticated'] = True
+            return redirect(url_for('index'))
+        else:
+            error = 'Invalid password. Please try again.'
+    return render_template_string(LOGIN_TEMPLATE, error=error)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    # Check for the one-time flag. If it exists, the user just logged in.
+    if session.pop('is_newly_authenticated', None):
+        # Allow the page to load and set a flag that allows API calls for this session.
+        session['api_allowed'] = True
+        return render_template_string(HTML_TEMPLATE)
+    else:
+        # If the flag doesn't exist, it's a refresh or direct visit.
+        # Clear any leftover API flags and redirect to login.
+        session.pop('api_allowed', None)
+        return redirect(url_for('login'))
 
 @app.route('/decode-qr', methods=['POST'])
 def decode_qr_endpoint():
+    # API calls now check for the 'api_allowed' flag instead of a persistent one.
+    if not session.get('api_allowed'):
+        return jsonify({'error': 'Not authorized. Please log in again.'}), 401
     try:
         data = request.json
         image_data = base64.b64decode(data['image'].split(',')[1])
@@ -546,16 +190,16 @@ def decode_qr_endpoint():
 
 @app.route('/mark-attendance', methods=['POST'])
 def mark_attendance_endpoint():
+    # API calls now check for the 'api_allowed' flag.
+    if not session.get('api_allowed'):
+        return jsonify({'error': 'Not authorized. Please log in again.'}), 401
     try:
         data = request.json
         attendance_id = data.get('attendance_id')
-        students = data.get('students') 
-
+        students = data.get('students')
         if not attendance_id or not students:
             return jsonify({'error': 'Attendance ID and student list are required.'}), 400
-        
         result_data = run_attendance_for_all(attendance_id, students)
-        
         return jsonify(result_data)
     except Exception as e:
         return jsonify({'logs': [f"A critical server error occurred: {str(e)}"], 'table_data': []}), 500
