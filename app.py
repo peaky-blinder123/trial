@@ -18,7 +18,7 @@ app.secret_key = 'your_very_secret_and_random_key_12345'
 
 # The required password to access the application.
 # IMPORTANT: Change this password for security!
-APP_PASSWORD = "z8!qW-bK$v-x#7sE-j9@Lp-f3^aY-c5&uI-p2*oT-m6(rZ-h1)gN-v4}eX-k0{dC-w7[eS-t8]fB-n9;qA-r2:pD-g5<uF-s3>vG-a1,yH-b4.zJ-c6?iK"
+APP_PASSWORD = "z8!qW-bK$v-x#7sE-j9@Lp-f3^aY-c5&uI-p2*oT-m6(rZ-h1)gN-v4}eX-k0{dC-w7[eS-t8]fB-n9;qA-r2:pD-g5<uF-s3>vG-a1,yH-b4.zJ-c6?iKujshdbcjuhudywegaibvx"
 
 # =============================================================================
 # CORE ATTENDANCE LOGIC (Unchanged)
@@ -108,7 +108,7 @@ def parse_logs_for_table(logs, students):
                         parts = log.split('|')
                         http_status = re.search(r'Status: (\d+)', parts[0]).group(1)
                         response_json = json.loads(parts[1].replace("Response:", "").strip())
-                        if http_status == '200' and response_json.get('status') == 'success':
+                        if http_status == '200' and (response_json.get('status') == 'success' or response_json.get('code') == 'SUCCESS'):
                             result_entry["status"] = "Success"
                         else:
                             result_entry["status"] = "Failed"
@@ -130,22 +130,773 @@ def run_attendance_for_all(attendance_id, students):
         thread = threading.Thread(target=process_student, args=(student, attendance_id, output_log))
         threads.append(thread)
         thread.start()
-        time.sleep(random.uniform(0.5, 0.8))
+        time.sleep(random.uniform(0.4, 0.7))
     for thread in threads:
         thread.join()
     table_data = parse_logs_for_table(output_log, students)
     return {"logs": output_log, "table_data": table_data}
 
 # =============================================================================
-# TEMPLATES (HTML/JS Updated for Responsiveness)
+# TEMPLATES (HTML/JS Updated for Responsiveness and Readability)
 # =============================================================================
 
 LOGIN_TEMPLATE = """
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Login - Attendance Automator</title><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"><style>body{font-family:'Poppins',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background-color:#1e1e2e;margin:0;padding:1rem}h1{color:#f1f1f1}.login-container{background:#2a2a40;padding:2.5rem;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.4);text-align:center;max-width:400px;width:100%;border:1px solid #444}.error{color:#ff8a8a;background:#4d2a2a;border:1px solid #f5c6cb4d;padding:10px;border-radius:8px;margin-bottom:1rem}input[type=password]{width:100%;padding:12px;border:1px solid #555;border-radius:8px;font-size:16px;margin-bottom:1rem;background-color:#1e1e2e;color:#f1f1f1;box-sizing:border-box}.button{background-image:linear-gradient(45deg, #4a90e2 0%, #50e3c2 100%);color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s}.button:hover{transform:translateY(-2px)}</style></head><body><div class="login-container"><h1>Enter Password</h1>{% if error %}<p class="error">{{ error }}</p>{% endif %}<form method="post"><input type="password" name="password" placeholder="Password" required autofocus><button type="submit" class="button">Login</button></form></div></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Attendance Automator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Poppins', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #1e1e2e; margin: 0; padding: 1rem; }
+        h1 { color: #f1f1f1; }
+        .login-container { background: #2a2a40; padding: 2.5rem; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.4); text-align: center; max-width: 400px; width: 100%; border: 1px solid #444; }
+        .error { color: #ff8a8a; background: #4d2a2a; border: 1px solid #f5c6cb4d; padding: 10px; border-radius: 8px; margin-bottom: 1rem; }
+        input[type=password] { width: 100%; padding: 12px; border: 1px solid #555; border-radius: 8px; font-size: 16px; margin-bottom: 1rem; background-color: #1e1e2e; color: #f1f1f1; box-sizing: border-box; }
+        .button { background-image: linear-gradient(45deg, #4a90e2 0%, #50e3c2 100%); color: #fff; border: none; padding: 12px 24px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all .3s; }
+        .button:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Enter Password</h1>
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+        <form method="post">
+            <input type="password" name="password" placeholder="Password" required autofocus>
+            <button type="submit" class="button">Login</button>
+        </form>
+    </div>
+</body>
+</html>
 """
 
 HTML_TEMPLATE = """
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Attendance Automator</title><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>:root{--primary-color:#4a90e2;--secondary-color:#50e3c2;--bg-color:#1e1e2e;--card-bg:#2a2a40;--text-color:#f1f1f1;--shadow:0 10px 30px rgba(0,0,0,.4);--success-color:#28a745;--error-color:#dc3545}body{font-family:'Poppins',sans-serif;display:flex;align-items:flex-start;justify-content:center;min-height:100vh;background-color:var(--bg-color);color:var(--text-color);margin:0;padding:1rem;box-sizing:border-box}.container{background:var(--card-bg);padding:2rem;border-radius:20px;box-shadow:var(--shadow);text-align:center;max-width:900px;width:100%;transition:all .3s ease;position:relative;border:1px solid #444;box-sizing:border-box}.logout-btn{position:absolute;top:15px;right:20px;background:none;border:1px solid #555;color:#aaa;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}.logout-btn:hover{background:#333}h1,h2,h3{color:var(--text-color);margin-bottom:.5rem}p.subtitle{color:#aaa;margin-top:0;margin-bottom:2rem}.button{background-image:linear-gradient(45deg, var(--primary-color) 0%, var(--secondary-color) 100%);color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s;margin:.5rem;box-shadow:0 4px 15px rgba(0,0,0,.2);display:inline-block;text-align:center}.button:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.25)}.button-secondary{background-image:none;background-color:#444;color:#f1f1f1}.button-secondary:hover{background-color:#555}.hidden{display:none}.flex-container{display:flex;justify-content:space-between;gap:2rem;margin-top:2rem;flex-wrap:wrap}.panel{flex:1;min-width:280px;text-align:left}#student-manager-panel,#process-panel{border:1px solid #444;padding:1.5rem;border-radius:12px}.input-group{margin-bottom:1rem}.input-group label{display:block;margin-bottom:5px;font-weight:600;font-size:14px}input[type=text],input[type=password]{width:100%;padding:12px;border:1px solid #555;border-radius:8px;font-size:16px;background-color:#1e1e2e;color:#f1f1f1;box-sizing:border-box}#decoded-id{background:#1e1e2e;padding:10px;border-radius:8px;font-weight:600;color:var(--primary-color);word-wrap:break-word;margin:1rem 0;border:1px solid #444}#results-log{margin-top:1rem;text-align:left;background:#1a1a1a;color:#f1f1f1;border-radius:8px;padding:1rem;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-wrap:break-word;font-family:'Courier New',Courier,monospace;font-size:14px;border:1px solid #444}.loader{border:4px solid #444;border-top:4px solid var(--primary-color);border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:20px auto}@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}#student-list-table,#results-table{border-collapse:collapse;width:100%;margin-top:1.5rem;font-size:14px}#student-list-table th,#student-list-table td,#results-table th,#results-table td{border:1px solid #444;padding:10px;text-align:left}#student-list-table th,#results-table th{background-color:#333757;font-weight:600}.status{font-weight:700;padding:5px 8px;border-radius:5px;color:#fff;display:inline-block}.status-success{background-color:var(--success-color)}.status-failed{background-color:var(--error-color)}.options-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:1rem}#camera-view #reader{border:2px solid #555;border-radius:8px;overflow:hidden}#zoom-controls{margin-top:10px}.zoom-label{font-size:14px;margin-right:10px}@media (max-width:768px){body{padding-top:1rem}.container{padding:1.5rem}.flex-container{flex-direction:column}h1{font-size:1.8rem}#student-list-table thead,#results-table thead{display:none}#student-list-table,#student-list-table tbody,#student-list-table tr,#student-list-table td,#results-table,#results-table tbody,#results-table tr,#results-table td{display:block;width:100%;box-sizing:border-box}#student-list-table tr,#results-table tr{margin-bottom:15px;border:1px solid #444;border-radius:8px;padding:5px}#student-list-table td,#results-table td{text-align:right;padding-left:50%;position:relative;border:none;border-bottom:1px solid #333;min-height:24px}#student-list-table td:before,#results-table td:before{content:attr(data-label);position:absolute;left:10px;width:45%;padding-right:10px;white-space:nowrap;text-align:left;font-weight:700}#student-list-table td:last-child,#results-table td:last-child{border-bottom:0}#student-list-table td[data-label="Email"],#results-table td[data-label="Response"]{white-space:normal;word-wrap:break-word;overflow-wrap:break-word;text-align:left;padding-left:10px;padding-top:30px}#student-list-table td[data-label="Email"]:before,#results-table td[data-label="Response"]:before{top:10px}}</style></head><body><div class="container"><a href="/logout" class="logout-btn">Logout</a><h1>Attendance Automator</h1><p class="subtitle">Manage your student list, then scan a QR code to mark attendance for everyone.</p><div class="flex-container"><div class="panel" id="student-manager-panel"><h2>Student List</h2><p style="font-size:12px;color:#777">Your list is saved in your browser. Max 10 students.</p><form id="add-student-form"><div class="input-group"><label for="email">Email</label><input type="text" id="email" required></div><div class="input-group"><label for="password">Password</label><input type="password" id="password" required></div><div class="input-group"><label for="stu_id">Student ID</label><input type="text" id="stu_id" required></div><button type="submit" class="button">Add Student</button></form><hr style="margin:1.5rem 0; border-color: #444;"><table id="student-list-table"><thead><tr><th>Email</th><th>Action</th></tr></thead><tbody></tbody></table><div style="margin-top:1rem"><label for="json-upload" class="button button-secondary">Upload credentials.json</label><input type="file" id="json-upload" accept=".json" class="hidden"></div></div><div class="panel" id="process-panel"><div id="initial-view"><h2>Step 1: Get Attendance ID</h2><div class="options-grid"><button class="button" id="start-camera-btn">Scan with Camera (Live)</button><label for="qr-upload" class="button">Upload QR Image</label><input type="file" id="qr-upload" accept="image/*" class="hidden"></div><hr style="margin:1.5rem 0; border-color: #444;"><div class="input-group" style="margin-top:1rem"><input type="text" id="qr-text-input" placeholder="Or paste QR text here..."><button class="button" id="submit-text-btn">Use Text</button></div></div><div id="camera-view" class="hidden"><div id="reader" width="100%"></div><div id="zoom-controls" class="hidden"><span class="zoom-label">Zoom:</span><input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1"></div><button class="button button-secondary" id="cancel-scan-btn" style="margin-top:1rem;">Cancel</button></div><div id="confirm-view" class="hidden"><h2>Step 2: Confirm & Run</h2><p><strong>Attendance ID:</strong></p><div id="decoded-id"></div><button class="button" id="mark-attendance-btn">Confirm & Mark Attendance</button></div><div id="results-view" class="hidden"><h2>Process Complete</h2><div id="results-loader" class="loader"></div><div id="results-content" class="hidden"><h3>Results Summary</h3><div style="max-height:350px;overflow-y:auto;border:1px solid #444;border-radius:8px;margin-bottom:1rem"><table id="results-table"><thead><tr><th>Email</th><th>Status</th><th>Response</th></tr></thead><tbody></tbody></table></div><h3>Raw Log</h3><div id="results-log"></div><button class="button" onclick="location.reload()">Run Again</button></div></div></div></div></div><audio id="beep-sound" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU9vT19PANkPCz4/rgr5Cg8+v60K+g4QPj/9CvoODz/APww/QD8P/w8+P/8K+g4QPj+tCvoODz6/rQr5Cg8+P60K+QoPPg=="></audio><script>const addStudentForm=document.getElementById("add-student-form"),studentListBody=document.querySelector("#student-list-table tbody"),jsonUpload=document.getElementById("json-upload"),initialView=document.getElementById("initial-view"),cameraView=document.getElementById("camera-view"),confirmView=document.getElementById("confirm-view"),resultsView=document.getElementById("results-view"),startCameraBtn=document.getElementById("start-camera-btn"),qrUploadInput=document.getElementById("qr-upload"),submitTextBtn=document.getElementById("submit-text-btn"),markAttendanceBtn=document.getElementById("mark-attendance-btn"),qrTextInput=document.getElementById("qr-text-input"),decodedIdDiv=document.getElementById("decoded-id"),resultsLogDiv=document.getElementById("results-log"),resultsLoader=document.getElementById("results-loader"),resultsContent=document.getElementById("results-content"),resultsTableBody=document.querySelector("#results-table tbody"),cancelScanBtn=document.getElementById("cancel-scan-btn"),zoomControls=document.getElementById("zoom-controls"),zoomSlider=document.getElementById("zoom-slider"),beepSound=document.getElementById("beep-sound");let students=[],decodedAttendanceId=null,html5QrCode=null;function saveStudents(){localStorage.setItem("studentList",JSON.stringify(students))}function renderStudentList(){studentListBody.innerHTML="";students.forEach((e,t)=>{const n=`<tr>\n <td data-label="Email">${e.email}</td>\n <td data-label="Action"><button onclick="deleteStudent(${t})" style="background:var(--error-color); color:white; border:none; padding: 5px 10px; border-radius:5px; cursor:pointer;">Delete</button></td>\n </tr>`;studentListBody.innerHTML+=n})}function addStudent(e,t,n){if(students.length>=10){alert("You can only add up to 10 students.");return}if(students.some(t=>t.email===e)){alert("This email is already in the list.");return}students.push({email:e,password:t,stu_id:n});saveStudents();renderStudentList()}function deleteStudent(e){students.splice(e,1);saveStudents();renderStudentList()}addStudentForm.addEventListener("submit",e=>{e.preventDefault();const t=document.getElementById("email").value,n=document.getElementById("password").value,d=document.getElementById("stu_id").value;addStudent(t,n,d);addStudentForm.reset()});jsonUpload.addEventListener("change",e=>{const t=e.target.files[0];if(!t)return;const n=new FileReader;n.onload=e=>{try{const t=JSON.parse(e.target.result);if(!t.students||!Array.isArray(t.students))throw new Error("Invalid JSON format.");students=t.students.slice(0,10),saveStudents(),renderStudentList(),alert(`${students.length} students loaded successfully!`)}catch(t){alert(`Error reading file: ${t.message}`)}};n.readAsText(t)});document.addEventListener("DOMContentLoaded",()=>{const e=localStorage.getItem("studentList");e&&(students=JSON.parse(e),renderStudentList())});startCameraBtn.addEventListener("click",startLiveScanner);qrUploadInput.addEventListener("change",handleFileUpload);submitTextBtn.addEventListener("click",usePastedText);markAttendanceBtn.addEventListener("click",runAttendanceProcess);cancelScanBtn.addEventListener("click",()=>{if(html5QrCode&&html5QrCode.isScanning){html5QrCode.stop().then(e=>showView(initialView)).catch(e=>console.error("Failed to stop scanner",e))}});function showView(e){[initialView,cameraView,confirmView,resultsView].forEach(t=>t.classList.add("hidden"));e.classList.remove("hidden")}const onScanSuccess=(e,t)=>{beepSound.play();if(html5QrCode&&html5QrCode.isScanning){html5QrCode.stop().then(()=>{decodedAttendanceId=e;showConfirmationScreen()}).catch(e=>{console.error("Failed to stop scanner but proceeding anyway.",e);decodedAttendanceId=e;showConfirmationScreen()})}};const onScanFailure=e=>{};function startLiveScanner(){showView(cameraView);html5QrCode=new Html5Qrcode("reader");const e={fps:10,qrbox:{width:250,height:250}};html5QrCode.start({facingMode:"environment"},e,onScanSuccess,onScanFailure).then(()=>{setupZoom()}).catch(e=>{alert("Could not start camera. Please grant permission and try again.");showView(initialView)})}function setupZoom(){try{const e=html5QrCode.getRunningTrackCapabilities(),t=html5QrCode.getRunningTrack();if(t&&e.zoom){const n=e.zoom.min,o=e.zoom.max,a=e.zoom.step;zoomSlider.min=n,zoomSlider.max=o,zoomSlider.step=a,zoomControls.classList.remove("hidden"),zoomSlider.addEventListener("input",e=>{const n=parseFloat(e.target.value);t.applyConstraints({advanced:[{zoom:n}]}).catch(e=>{console.error("Error applying zoom constraints:",e)})})}else console.log("Zoom is not supported by this camera.")}catch(e){console.error("Could not set up zoom controls:",e)}}function handleFileUpload(e){const t=e.target.files[0];if(t){if(!t.type.startsWith("image/")){alert("Please upload a valid image file.");return}const e=new FileReader;e.onload=e=>{const t=e.target.result;showView(resultsView);resultsContent.classList.add("hidden");resultsLoader.classList.remove("hidden");resultsLogDiv.textContent="Decoding uploaded QR code via API...";decodeImageOnServer(t)};e.onerror=()=>{alert("Error reading file.")};e.readAsDataURL(t)}}async function decodeImageOnServer(e){try{const t=await fetch("/decode-qr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:e})});if(!t.ok){const e=await t.json();throw new Error(e.error||`Server responded with status ${t.status}`)}const n=await t.json();if(n.error)throw new Error(n.error);decodedAttendanceId=n.attendance_id,showConfirmationScreen()}catch(e){showView(initialView);alert(`Error decoding QR: ${e.message}`)}}function usePastedText(){const e=qrTextInput.value.trim();e?(decodedAttendanceId=e,showConfirmationScreen()):alert("Please paste the QR code text.")}function showConfirmationScreen(){if(students.length===0){alert("Please add at least one student before marking attendance.");location.reload();return}showView(confirmView);decodedIdDiv.textContent=decodedAttendanceId}async function runAttendanceProcess(){showView(resultsView);resultsLoader.classList.remove("hidden");resultsContent.classList.add("hidden");try{const e=await fetch("/mark-attendance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({attendance_id:decodedAttendanceId,students:students})}),t=await e.json();resultsLoader.classList.add("hidden");resultsContent.classList.remove("hidden");resultsTableBody.innerHTML="";t.table_data.forEach(e=>{const t="Success"===e.status?"status-success":"status-failed",n=`<tr>\n <td data-label="Email">${e.email}</td>\n <td data-label="Status"><span class="status ${t}">${e.status}</span></td>\n <td data-label="Response">${e.response}</td>\n </tr>`;resultsTableBody.innerHTML+=n});resultsLogDiv.textContent=t.logs.join("\\n")}catch(e){resultsLoader.classList.add("hidden");resultsContent.classList.remove("hidden");resultsLogDiv.textContent=`An error occurred: ${e.message}`}}</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Automator</title>
+    <!-- External Fonts and Libraries -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+    <!-- Internal CSS Styles -->
+    <style>
+        /* CSS Variables for easy theme management */
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50e3c2;
+            --bg-color: #1e1e2e;
+            --card-bg: #2a2a40;
+            --text-color: #f1f1f1;
+            --shadow: 0 10px 30px rgba(0, 0, 0, .4);
+            --success-color: #28a745;
+            --error-color: #dc3545;
+        }
+
+        /* Basic Body Styling */
+        body {
+            font-family: 'Poppins', sans-serif;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+
+        /* Main container for the application */
+        .container {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+            text-align: center;
+            max-width: 900px;
+            width: 100%;
+            transition: all .3s ease;
+            position: relative;
+            border: 1px solid #444;
+            box-sizing: border-box;
+        }
+        .logout-btn {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .logout-btn:hover { background: #333; }
+
+        /* Typography */
+        h1, h2, h3 { color: var(--text-color); margin-bottom: .5rem; }
+        p.subtitle { color: #aaa; margin-top: 0; margin-bottom: 2rem; }
+
+        /* Button Styles */
+        .button {
+            background-image: linear-gradient(45deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .3s;
+            margin: .5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,.2);
+            display: inline-block;
+            text-align: center;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,.25);
+        }
+        .button-secondary {
+            background-image: none;
+            background-color: #444;
+            color: #f1f1f1;
+        }
+        .button-secondary:hover { background-color: #555; }
+
+        /* Utility Classes */
+        .hidden { display: none; }
+
+        /* Layout Styles */
+        .flex-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 2rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+        .panel {
+            flex: 1;
+            min-width: 280px;
+            text-align: left;
+        }
+        #student-manager-panel, #process-panel {
+            border: 1px solid #444;
+            padding: 1.5rem;
+            border-radius: 12px;
+        }
+
+        /* Form and Input Styles */
+        .input-group { margin-bottom: 1rem; }
+        .input-group label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
+        input[type=text], input[type=password] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #555;
+            border-radius: 8px;
+            font-size: 16px;
+            background-color: #1e1e2e;
+            color: #f1f1f1;
+            box-sizing: border-box;
+        }
+        #decoded-id {
+            background: #1e1e2e;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 600;
+            color: var(--primary-color);
+            word-wrap: break-word;
+            margin: 1rem 0;
+            border: 1px solid #444;
+        }
+
+        /* Results and Log Display */
+        #results-log {
+            margin-top: 1rem;
+            text-align: left;
+            background: #1a1a1a;
+            color: #f1f1f1;
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            border: 1px solid #444;
+        }
+        .loader {
+            border: 4px solid #444;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Table Styles */
+        #student-list-table, #results-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 1.5rem;
+            font-size: 14px;
+        }
+        #student-list-table th, #student-list-table td, #results-table th, #results-table td {
+            border: 1px solid #444;
+            padding: 10px;
+            text-align: left;
+        }
+        #student-list-table th, #results-table th {
+            background-color: #333757;
+            font-weight: 600;
+        }
+        .status {
+            font-weight: 700;
+            padding: 5px 8px;
+            border-radius: 5px;
+            color: #fff;
+            display: inline-block;
+        }
+        .status-success { background-color: var(--success-color); }
+        .status-failed { background-color: var(--error-color); }
+
+        /* QR Scanner Specific Styles */
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-bottom: 1rem;
+        }
+        #camera-view #reader {
+            border: 2px solid #555;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #zoom-controls { margin-top: 10px; }
+        .zoom-label { font-size: 14px; margin-right: 10px; }
+
+        /* Responsive Design for smaller screens */
+        @media (max-width: 768px) {
+            body { padding-top: 1rem; }
+            .container { padding: 1.5rem; }
+            .flex-container { flex-direction: column; }
+            h1 { font-size: 1.8rem; }
+            
+            /* Responsive table styles: convert table to a list-like view */
+            #student-list-table thead, #results-table thead { display: none; }
+            #student-list-table, #student-list-table tbody, #student-list-table tr, #student-list-table td,
+            #results-table, #results-table tbody, #results-table tr, #results-table td {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            #student-list-table tr, #results-table tr {
+                margin-bottom: 15px;
+                border: 1px solid #444;
+                border-radius: 8px;
+                padding: 5px;
+            }
+            #student-list-table td, #results-table td {
+                text-align: right;
+                padding-left: 50%;
+                position: relative;
+                border: none;
+                border-bottom: 1px solid #333;
+                min-height: 24px;
+            }
+            #student-list-table td:before, #results-table td:before {
+                content: attr(data-label);
+                position: absolute;
+                left: 10px;
+                width: 45%;
+                padding-right: 10px;
+                white-space: nowrap;
+                text-align: left;
+                font-weight: 700;
+            }
+            #student-list-table td:last-child, #results-table td:last-child { border-bottom: 0; }
+            #student-list-table td[data-label="Email"], #results-table td[data-label="Response"] {
+                white-space: normal;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+                text-align: left;
+                padding-left: 10px;
+                padding-top: 30px;
+            }
+            #student-list-table td[data-label="Email"]:before, #results-table td[data-label="Response"]:before {
+                top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Main Application Container -->
+    <div class="container">
+        <a href="/logout" class="logout-btn">Logout</a>
+        <h1>Attendance Automator</h1>
+        <p class="subtitle">Manage your student list, then scan a QR code to mark attendance for everyone.</p>
+
+        <!-- Flex container for the two main panels -->
+        <div class="flex-container">
+            
+            <!-- Left Panel: Student List Management -->
+            <div class="panel" id="student-manager-panel">
+                <h2>Student List</h2>
+                <p style="font-size:12px;color:#777">Your list is saved in your browser. Max 15 students.</p>
+                
+                <!-- Form to add a new student -->
+                <form id="add-student-form">
+                    <div class="input-group">
+                        <label for="email">Email</label>
+                        <input type="text" id="email" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="stu_id">Student ID</label>
+                        <input type="text" id="stu_id" required>
+                    </div>
+                    <button type="submit" class="button">Add Student</button>
+                </form>
+
+                <hr style="margin:1.5rem 0; border-color: #444;">
+
+                <!-- Table to display the list of students -->
+                <table id="student-list-table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Student rows will be injected here by JavaScript -->
+                    </tbody>
+                </table>
+
+                <!-- Option to upload a JSON file with credentials -->
+                <div style="margin-top:1rem">
+                    <label for="json-upload" class="button button-secondary">Upload credentials.json</label>
+                    <input type="file" id="json-upload" accept=".json" class="hidden">
+                </div>
+            </div>
+
+            <!-- Right Panel: Attendance Processing Workflow -->
+            <div class="panel" id="process-panel">
+                
+                <!-- View 1: Initial options to get the Attendance ID -->
+                <div id="initial-view">
+                    <h2>Step 1: Get Attendance ID</h2>
+                    <div class="options-grid">
+                        <button class="button" id="start-camera-btn">Scan with Camera (Live)</button>
+                        <label for="qr-upload" class="button">Upload QR Image</label>
+                        <input type="file" id="qr-upload" accept="image/*" class="hidden">
+                    </div>
+                    <hr style="margin:1.5rem 0; border-color: #444;">
+                    <div class="input-group" style="margin-top:1rem">
+                        <input type="text" id="qr-text-input" placeholder="Or paste QR text here...">
+                        <button class="button" id="submit-text-btn">Use Text</button>
+                    </div>
+                </div>
+
+                <!-- View 2: Camera view for live scanning -->
+                <div id="camera-view" class="hidden">
+                    <div id="reader" width="100%"></div>
+                    <div id="zoom-controls" class="hidden">
+                        <span class="zoom-label">Zoom:</span>
+                        <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1">
+                    </div>
+                    <button class="button button-secondary" id="cancel-scan-btn" style="margin-top:1rem;">Cancel</button>
+                </div>
+
+                <!-- View 3: Confirmation screen before running the process -->
+                <div id="confirm-view" class="hidden">
+                    <h2>Step 2: Confirm & Run</h2>
+                    <p><strong>Attendance ID:</strong></p>
+                    <div id="decoded-id"></div>
+                    <button class="button" id="mark-attendance-btn">Confirm & Mark Attendance</button>
+                </div>
+
+                <!-- View 4: Results display after the process is complete -->
+                <div id="results-view" class="hidden">
+                    <h2>Process Complete</h2>
+                    <div id="results-loader" class="loader"></div>
+                    <div id="results-content" class="hidden">
+                        <h3>Results Summary</h3>
+                        <div style="max-height:350px; overflow-y:auto; border:1px solid #444; border-radius:8px; margin-bottom:1rem;">
+                            <table id="results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Email</th>
+                                        <th>Status</th>
+                                        <th>Response</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Results rows will be injected here by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <h3>Raw Log</h3>
+                        <div id="results-log"></div>
+                        <button class="button" onclick="location.reload()">Run Again</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio element for beep sound on successful scan -->
+    <audio id="beep-sound" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU9vT19PANkPCz4/rgr5Cg8+v60K+g4QPj/9CvoODz/APww/QD8P/w8+P/8K+g4QPj+tCvoODz6/rQr5Cg8+P60K+QoPPg=="></audio>
+
+    <!-- Main JavaScript Logic -->
+    <script>
+        // DOM Element References
+        const addStudentForm = document.getElementById('add-student-form');
+        const studentListBody = document.querySelector('#student-list-table tbody');
+        const jsonUpload = document.getElementById('json-upload');
+        const initialView = document.getElementById('initial-view');
+        const cameraView = document.getElementById('camera-view');
+        const confirmView = document.getElementById('confirm-view');
+        const resultsView = document.getElementById('results-view');
+        const startCameraBtn = document.getElementById('start-camera-btn');
+        const qrUploadInput = document.getElementById('qr-upload');
+        const submitTextBtn = document.getElementById('submit-text-btn');
+        const markAttendanceBtn = document.getElementById('mark-attendance-btn');
+        const qrTextInput = document.getElementById('qr-text-input');
+        const decodedIdDiv = document.getElementById('decoded-id');
+        const resultsLogDiv = document.getElementById('results-log');
+        const resultsLoader = document.getElementById('results-loader');
+        const resultsContent = document.getElementById('results-content');
+        const resultsTableBody = document.querySelector('#results-table tbody');
+        const cancelScanBtn = document.getElementById('cancel-scan-btn');
+        const zoomControls = document.getElementById('zoom-controls');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const beepSound = document.getElementById('beep-sound');
+
+        // Application State
+        let students = [];
+        let decodedAttendanceId = null;
+        let html5QrCode = null;
+
+        // --- Student Management Functions ---
+
+        // Save the current student list to localStorage
+        function saveStudents() {
+            localStorage.setItem('studentList', JSON.stringify(students));
+        }
+
+        // Render the student list in the table
+        function renderStudentList() {
+            studentListBody.innerHTML = '';
+            students.forEach((student, index) => {
+                const row = `<tr>
+                    <td data-label="Email">${student.email}</td>
+                    <td data-label="Action"><button onclick="deleteStudent(${index})" style="background:var(--error-color); color:white; border:none; padding: 5px 10px; border-radius:5px; cursor:pointer;">Delete</button></td>
+                </tr>`;
+                studentListBody.innerHTML += row;
+            });
+        }
+
+        // Add a new student to the list
+        function addStudent(email, password, stu_id) {
+            if (students.length >= 15) {
+                alert("You can only add up to 15 students.");
+                return;
+            }
+            if (students.some(s => s.email === email)) {
+                alert("This email is already in the list.");
+                return;
+            }
+            students.push({ email, password, stu_id });
+            saveStudents();
+            renderStudentList();
+        }
+
+        // Delete a student from the list
+        function deleteStudent(index) {
+            students.splice(index, 1);
+            saveStudents();
+            renderStudentList();
+        }
+
+        // Event listener for the "Add Student" form
+        addStudentForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const stu_id = document.getElementById('stu_id').value;
+            addStudent(email, password, stu_id);
+            addStudentForm.reset();
+        });
+
+        // Event listener for JSON file upload
+        jsonUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (!data.students || !Array.isArray(data.students)) {
+                        throw new Error("Invalid JSON format. Expected a 'students' array.");
+                    }
+                    students = data.students.slice(0, 15); // Enforce max limit
+                    saveStudents();
+                    renderStudentList();
+                    alert(`${students.length} students loaded successfully!`);
+                } catch (error) {
+                    alert(`Error reading file: ${error.message}`);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // Load students from localStorage when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            const storedStudents = localStorage.getItem('studentList');
+            if (storedStudents) {
+                students = JSON.parse(storedStudents);
+                renderStudentList();
+            }
+        });
+
+        // --- UI and Workflow Functions ---
+
+        // Add event listeners to workflow buttons
+        startCameraBtn.addEventListener('click', startLiveScanner);
+        qrUploadInput.addEventListener('change', handleFileUpload);
+        submitTextBtn.addEventListener('click', usePastedText);
+        markAttendanceBtn.addEventListener('click', runAttendanceProcess);
+        cancelScanBtn.addEventListener('click', () => {
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(ignore => showView(initialView)).catch(err => console.error("Failed to stop scanner", err));
+            }
+        });
+
+        // Helper function to switch between different views
+        function showView(viewToShow) {
+            [initialView, cameraView, confirmView, resultsView].forEach(view => view.classList.add('hidden'));
+            viewToShow.classList.remove('hidden');
+        }
+
+        // --- QR Code Handling ---
+
+        // Success callback for the QR scanner
+        const onScanSuccess = (decodedText, decodedResult) => {
+            beepSound.play();
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(() => {
+                    decodedAttendanceId = decodedText;
+                    showConfirmationScreen();
+                }).catch(err => {
+                    console.error("Failed to stop scanner but proceeding anyway.", err);
+                    decodedAttendanceId = decodedText;
+                    showConfirmationScreen();
+                });
+            }
+        };
+        
+        // Failure callback for the QR scanner (optional)
+        const onScanFailure = (error) => {
+            // console.warn(`QR error = ${error}`);
+        };
+
+        // Initialize and start the live camera scanner
+        function startLiveScanner() {
+            showView(cameraView);
+            html5QrCode = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
+                .then(() => {
+                    setupZoom(); // Attempt to set up zoom controls after camera starts
+                })
+                .catch(err => {
+                    alert("Could not start camera. Please grant permission and try again.");
+                    showView(initialView);
+                });
+        }
+        
+        // Set up zoom controls if the camera supports it
+        function setupZoom() {
+            try {
+                // The html5-qrcode library internally creates a video stream. We can access it
+                // by finding the video element it creates inside the "reader" div.
+                // A brief timeout helps ensure the video element is rendered before we try to access it.
+                setTimeout(() => {
+                    const videoElement = document.querySelector("#reader video");
+                    if (!videoElement || !videoElement.srcObject) {
+                        console.error("No video element or video stream found. Zoom controls cannot be initialized.");
+                        return;
+                    }
+
+                    // Get the first video track from the media stream.
+                    const [track] = videoElement.srcObject.getVideoTracks();
+                    if (!track) {
+                        console.error("No video track found in the stream.");
+                        return;
+                    }
+
+                    // Use the browser's native MediaStreamTrack API to get camera capabilities.
+                    const capabilities = track.getCapabilities();
+                    
+                    // Check if the 'zoom' capability exists.
+                    if (capabilities.zoom) {
+                        // Configure the zoom slider based on the camera's reported min/max/step values.
+                        zoomSlider.min = capabilities.zoom.min;
+                        zoomSlider.max = capabilities.zoom.max;
+                        zoomSlider.step = capabilities.zoom.step || 0.1; // Provide a default step if not specified
+                        zoomSlider.value = track.getSettings().zoom || capabilities.zoom.min;
+                        
+                        // Make the zoom controls visible.
+                        zoomControls.classList.remove('hidden');
+
+                        // Add an event listener to apply the zoom level when the slider is moved.
+                        zoomSlider.addEventListener('input', (event) => {
+                            const zoomValue = parseFloat(event.target.value);
+                            track.applyConstraints({ advanced: [{ zoom: zoomValue }] })
+                                .catch(e => console.error("Error applying zoom:", e));
+                        });
+                    } else {
+                        console.log("Zoom not supported on this camera.");
+                    }
+                }, 500); // 500ms delay to allow the video element to initialize
+            } catch (e) {
+                console.error("Zoom setup failed:", e);
+            }
+        }
+
+        // Handle QR code from an uploaded image file
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (!file.type.startsWith('image/')) {
+                    alert("Please upload a valid image file.");
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const imageDataUrl = e.target.result;
+                    showView(resultsView);
+                    resultsContent.classList.add('hidden');
+                    resultsLoader.classList.remove('hidden');
+                    resultsLogDiv.textContent = "Decoding uploaded QR code via API...";
+                    decodeImageOnServer(imageDataUrl);
+                };
+                reader.onerror = () => {
+                    alert("Error reading file.");
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Send uploaded image to the server for decoding
+        async function decodeImageOnServer(imageDataUrl) {
+            try {
+                const response = await fetch('/decode-qr', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageDataUrl })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Server responded with status ${response.status}`);
+                }
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                decodedAttendanceId = result.attendance_id;
+                showConfirmationScreen();
+            } catch (error) {
+                showView(initialView);
+                alert(`Error decoding QR: ${error.message}`);
+            }
+        }
+
+        // Use the text pasted directly into the input field
+        function usePastedText() {
+            const qrText = qrTextInput.value.trim();
+            if (qrText) {
+                decodedAttendanceId = qrText;
+                showConfirmationScreen();
+            } else {
+                alert("Please paste the QR code text.");
+            }
+        }
+
+        // --- Final Attendance Process ---
+
+        // Show the confirmation screen with the decoded ID
+        function showConfirmationScreen() {
+            if (students.length === 0) {
+                alert("Please add at least one student before marking attendance.");
+                location.reload();
+                return;
+            }
+            showView(confirmView);
+            decodedIdDiv.textContent = decodedAttendanceId;
+        }
+
+        // Send data to the server to mark attendance for all students
+        async function runAttendanceProcess() {
+            showView(resultsView);
+            resultsLoader.classList.remove('hidden');
+            resultsContent.classList.add('hidden');
+
+            try {
+                const response = await fetch('/mark-attendance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        attendance_id: decodedAttendanceId,
+                        students: students
+                    })
+                });
+                const result = await response.json();
+
+                // Hide loader and show results content
+                resultsLoader.classList.add('hidden');
+                resultsContent.classList.remove('hidden');
+
+                // Populate the results table
+                resultsTableBody.innerHTML = '';
+                result.table_data.forEach(item => {
+                    const statusClass = item.status === 'Success' ? 'status-success' : 'status-failed';
+                    const row = `<tr>
+                        <td data-label="Email">${item.email}</td>
+                        <td data-label="Status"><span class="status ${statusClass}">${item.status}</span></td>
+                        <td data-label="Response">${item.response}</td>
+                    </tr>`;
+                    resultsTableBody.innerHTML += row;
+                });
+
+                // Display the raw logs
+                resultsLogDiv.textContent = result.logs.join('\\n');
+
+            } catch (error) {
+                resultsLoader.classList.add('hidden');
+                resultsContent.classList.remove('hidden');
+                resultsLogDiv.textContent = `An error occurred: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
 """
 
 # =============================================================================
@@ -157,7 +908,6 @@ def login():
     error = None
     if request.method == 'POST':
         if request.form.get('password') == APP_PASSWORD:
-            # Set a persistent session variable to mark the user as logged in.
             session['logged_in'] = True
             return redirect(url_for('index'))
         else:
@@ -166,25 +916,21 @@ def login():
 
 @app.route('/logout')
 def logout():
-    # Clear the session to log the user out.
     session.clear()
     return redirect(url_for('login'))
 
 @app.route('/')
 def index():
-    # Check if the user is logged in. If not, redirect to the login page.
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/decode-qr', methods=['POST'])
 def decode_qr_endpoint():
-    # This endpoint is now only for the "Upload Image" option.
     if not session.get('logged_in'):
         return jsonify({'error': 'Not authorized. Please log in again.'}), 401
     try:
         data = request.json
-        # The image data is base64 encoded, needs to be decoded before sending to the API.
         image_data = base64.b64decode(data['image'].split(',')[1])
         attendance_id = decode_qr_from_data(image_data)
         return jsonify({'attendance_id': attendance_id})
