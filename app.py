@@ -33,7 +33,7 @@ def login_and_get_cookie(username, password, output_log):
     }
     payload = {"dtype": "M", "Email": username, "pwd": password}
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        r = requests.post(url, json=payload, headers=headers, timeout=18)
         r.raise_for_status()
         if 'Set-Cookie' in r.headers:
             session_cookie = r.headers['Set-Cookie'].split(';')[0]
@@ -74,7 +74,7 @@ def mark_attendance(username, attendance_id, stu_id, cookie_str, output_log):
     }
     payload = {"attendanceId": attendance_id, "StuID": stu_id, "offQrCdEnbld": True}
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
         output_log.append(f"📊 [{username}] Status: {r.status_code} | Response: {r.text.strip()}")
     except requests.exceptions.RequestException as e:
         output_log.append(f"❌ [{username}] Attendance request failed: {e}")
@@ -103,20 +103,38 @@ def parse_logs_for_table(logs, students):
                     result_entry["status"] = "Login Failed"
                     result_entry["response"] = log.split(f"[{email}]")[1].strip()
                     break
+                # =================================================================
+# Find this part in your parse_logs_for_table function and replace it
+# =================================================================
+
                 elif "Status:" in log:
                     try:
                         parts = log.split('|')
                         http_status = re.search(r'Status: (\d+)', parts[0]).group(1)
-                        response_json = json.loads(parts[1].replace("Response:", "").strip())
-                        if http_status == '200' and (response_json.get('status') == 'success' or response_json.get('code') == 'SUCCESS'):
+                        response_text = parts[1].replace("Response:", "").strip()
+                        response_json = json.loads(response_text)
+                        
+                        # Safely access the nested 'code'
+                        status_code = ""
+                        if 'output' in response_json and 'data' in response_json['output']:
+                            status_code = response_json['output']['data'].get('code', '')
+
+                        # Check for success
+                        if http_status == '200' and 'suc' in status_code.lower():
                             result_entry["status"] = "Success"
+                            result_entry["response"] = "Attendance marked."
                         else:
                             result_entry["status"] = "Failed"
-                        result_entry["response"] = response_json.get('message', 'No message.')
-                    except (IndexError, AttributeError, json.JSONDecodeError):
+                            # Make the error message readable, e.g., "Attendance Not Valid"
+                            if status_code:
+                                result_entry["response"] = status_code.replace('_', ' ').title()
+                            else:
+                                result_entry["response"] = "Unknown server response."
+
+                    except (IndexError, AttributeError, json.JSONDecodeError, KeyError):
                         result_entry["status"] = "Error"
                         result_entry["response"] = "Could not parse server response."
-                    break
+                    break # Stop searching logs for this email
         results.append(result_entry)
     return results
 
@@ -180,11 +198,9 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attendance Automator</title>
-    <!-- External Fonts and Libraries -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
-    <!-- Internal CSS Styles -->
     <style>
         /* CSS Variables for easy theme management */
         :root {
@@ -317,22 +333,28 @@ HTML_TEMPLATE = """
             border: 1px solid #444;
         }
 
-        /* Results and Log Display */
+        /* MODIFICATION START: Improved styles for scrollable areas */
+        .results-table-container, #results-log {
+            max-height: 30vh; /* Use viewport height for better responsiveness on mobile */
+            overflow-y: auto; /* Ensure vertical scrolling is enabled */
+            -webkit-overflow-scrolling: touch; /* Adds momentum-based scrolling on iOS */
+            border: 1px solid #444;
+            border-radius: 8px;
+        }
+        .results-table-container {
+             margin-bottom: 1rem;
+        }
         #results-log {
-            margin-top: 1rem;
-            text-align: left;
             background: #1a1a1a;
             color: #f1f1f1;
-            border-radius: 8px;
             padding: 1rem;
-            max-height: 200px;
-            overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
             font-family: 'Courier New', Courier, monospace;
             font-size: 14px;
-            border: 1px solid #444;
         }
+        /* MODIFICATION END */
+
         .loader {
             border: 4px solid #444;
             border-top: 4px solid var(--primary-color);
@@ -353,6 +375,10 @@ HTML_TEMPLATE = """
             width: 100%;
             margin-top: 1.5rem;
             font-size: 14px;
+        }
+        /* MODIFICATION: Remove margin-top from #results-table to fit wrapper */
+        #results-table {
+            margin-top: 0;
         }
         #student-list-table th, #student-list-table td, #results-table th, #results-table td {
             border: 1px solid #444;
@@ -395,7 +421,6 @@ HTML_TEMPLATE = """
             .flex-container { flex-direction: column; }
             h1 { font-size: 1.8rem; }
             
-            /* Responsive table styles: convert table to a list-like view */
             #student-list-table thead, #results-table thead { display: none; }
             #student-list-table, #student-list-table tbody, #student-list-table tr, #student-list-table td,
             #results-table, #results-table tbody, #results-table tr, #results-table td {
@@ -443,21 +468,17 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <!-- Main Application Container -->
     <div class="container">
         <a href="/logout" class="logout-btn">Logout</a>
         <h1>Attendance Automator</h1>
         <p class="subtitle">Manage your student list, then scan a QR code to mark attendance for everyone.</p>
 
-        <!-- Flex container for the two main panels -->
         <div class="flex-container">
             
-            <!-- Left Panel: Student List Management -->
             <div class="panel" id="student-manager-panel">
                 <h2>Student List</h2>
                 <p style="font-size:12px;color:#777">Your list is saved in your browser. Max 15 students.</p>
                 
-                <!-- Form to add a new student -->
                 <form id="add-student-form">
                     <div class="input-group">
                         <label for="email">Email</label>
@@ -476,7 +497,6 @@ HTML_TEMPLATE = """
 
                 <hr style="margin:1.5rem 0; border-color: #444;">
 
-                <!-- Table to display the list of students -->
                 <table id="student-list-table">
                     <thead>
                         <tr>
@@ -485,21 +505,17 @@ HTML_TEMPLATE = """
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Student rows will be injected here by JavaScript -->
-                    </tbody>
+                        </tbody>
                 </table>
 
-                <!-- Option to upload a JSON file with credentials -->
                 <div style="margin-top:1rem">
                     <label for="json-upload" class="button button-secondary">Upload credentials.json</label>
                     <input type="file" id="json-upload" accept=".json" class="hidden">
                 </div>
             </div>
 
-            <!-- Right Panel: Attendance Processing Workflow -->
             <div class="panel" id="process-panel">
                 
-                <!-- View 1: Initial options to get the Attendance ID -->
                 <div id="initial-view">
                     <h2>Step 1: Get Attendance ID</h2>
                     <div class="options-grid">
@@ -514,7 +530,6 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
 
-                <!-- View 2: Camera view for live scanning -->
                 <div id="camera-view" class="hidden">
                     <div id="reader" width="100%"></div>
                     <div id="zoom-controls" class="hidden">
@@ -524,7 +539,6 @@ HTML_TEMPLATE = """
                     <button class="button button-secondary" id="cancel-scan-btn" style="margin-top:1rem;">Cancel</button>
                 </div>
 
-                <!-- View 3: Confirmation screen before running the process -->
                 <div id="confirm-view" class="hidden">
                     <h2>Step 2: Confirm & Run</h2>
                     <p><strong>Attendance ID:</strong></p>
@@ -532,13 +546,12 @@ HTML_TEMPLATE = """
                     <button class="button" id="mark-attendance-btn">Confirm & Mark Attendance</button>
                 </div>
 
-                <!-- View 4: Results display after the process is complete -->
                 <div id="results-view" class="hidden">
                     <h2>Process Complete</h2>
                     <div id="results-loader" class="loader"></div>
                     <div id="results-content" class="hidden">
                         <h3>Results Summary</h3>
-                        <div style="max-height:350px; overflow-y:auto; border:1px solid #444; border-radius:8px; margin-bottom:1rem;">
+                        <div class="results-table-container">
                             <table id="results-table">
                                 <thead>
                                     <tr>
@@ -548,8 +561,7 @@ HTML_TEMPLATE = """
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <!-- Results rows will be injected here by JavaScript -->
-                                </tbody>
+                                    </tbody>
                             </table>
                         </div>
                         <h3>Raw Log</h3>
@@ -561,10 +573,8 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Audio element for beep sound on successful scan -->
     <audio id="beep-sound" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU9vT19PANkPCz4/rgr5Cg8+v60K+g4QPj/9CvoODz/APww/QD8P/w8+P/8K+g4QPj+tCvoODz6/rQr5Cg8+P60K+QoPPg=="></audio>
 
-    <!-- Main JavaScript Logic -->
     <script>
         // DOM Element References
         const addStudentForm = document.getElementById('add-student-form');
@@ -596,12 +606,10 @@ HTML_TEMPLATE = """
 
         // --- Student Management Functions ---
 
-        // Save the current student list to localStorage
         function saveStudents() {
             localStorage.setItem('studentList', JSON.stringify(students));
         }
 
-        // Render the student list in the table
         function renderStudentList() {
             studentListBody.innerHTML = '';
             students.forEach((student, index) => {
@@ -613,7 +621,6 @@ HTML_TEMPLATE = """
             });
         }
 
-        // Add a new student to the list
         function addStudent(email, password, stu_id) {
             if (students.length >= 15) {
                 alert("You can only add up to 15 students.");
@@ -628,14 +635,12 @@ HTML_TEMPLATE = """
             renderStudentList();
         }
 
-        // Delete a student from the list
         function deleteStudent(index) {
             students.splice(index, 1);
             saveStudents();
             renderStudentList();
         }
 
-        // Event listener for the "Add Student" form
         addStudentForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;
@@ -645,7 +650,6 @@ HTML_TEMPLATE = """
             addStudentForm.reset();
         });
 
-        // Event listener for JSON file upload
         jsonUpload.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -667,7 +671,6 @@ HTML_TEMPLATE = """
             reader.readAsText(file);
         });
 
-        // Load students from localStorage when the page loads
         document.addEventListener('DOMContentLoaded', () => {
             const storedStudents = localStorage.getItem('studentList');
             if (storedStudents) {
@@ -678,7 +681,6 @@ HTML_TEMPLATE = """
 
         // --- UI and Workflow Functions ---
 
-        // Add event listeners to workflow buttons
         startCameraBtn.addEventListener('click', startLiveScanner);
         qrUploadInput.addEventListener('change', handleFileUpload);
         submitTextBtn.addEventListener('click', usePastedText);
@@ -689,7 +691,6 @@ HTML_TEMPLATE = """
             }
         });
 
-        // Helper function to switch between different views
         function showView(viewToShow) {
             [initialView, cameraView, confirmView, resultsView].forEach(view => view.classList.add('hidden'));
             viewToShow.classList.remove('hidden');
@@ -697,7 +698,6 @@ HTML_TEMPLATE = """
 
         // --- QR Code Handling ---
 
-        // Success callback for the QR scanner
         const onScanSuccess = (decodedText, decodedResult) => {
             beepSound.play();
             if (html5QrCode && html5QrCode.isScanning) {
@@ -712,12 +712,10 @@ HTML_TEMPLATE = """
             }
         };
         
-        // Failure callback for the QR scanner (optional)
         const onScanFailure = (error) => {
             // console.warn(`QR error = ${error}`);
         };
 
-        // Initialize and start the live camera scanner
         function startLiveScanner() {
             showView(cameraView);
             html5QrCode = new Html5Qrcode("reader");
@@ -732,56 +730,38 @@ HTML_TEMPLATE = """
                 });
         }
         
-        // Set up zoom controls if the camera supports it
         function setupZoom() {
             try {
-                // The html5-qrcode library internally creates a video stream. We can access it
-                // by finding the video element it creates inside the "reader" div.
-                // A brief timeout helps ensure the video element is rendered before we try to access it.
                 setTimeout(() => {
                     const videoElement = document.querySelector("#reader video");
                     if (!videoElement || !videoElement.srcObject) {
-                        console.error("No video element or video stream found. Zoom controls cannot be initialized.");
                         return;
                     }
-
-                    // Get the first video track from the media stream.
                     const [track] = videoElement.srcObject.getVideoTracks();
                     if (!track) {
-                        console.error("No video track found in the stream.");
                         return;
                     }
-
-                    // Use the browser's native MediaStreamTrack API to get camera capabilities.
                     const capabilities = track.getCapabilities();
-                    
-                    // Check if the 'zoom' capability exists.
                     if (capabilities.zoom) {
-                        // Configure the zoom slider based on the camera's reported min/max/step values.
                         zoomSlider.min = capabilities.zoom.min;
                         zoomSlider.max = capabilities.zoom.max;
-                        zoomSlider.step = capabilities.zoom.step || 0.1; // Provide a default step if not specified
+                        zoomSlider.step = capabilities.zoom.step || 0.1;
                         zoomSlider.value = track.getSettings().zoom || capabilities.zoom.min;
                         
-                        // Make the zoom controls visible.
                         zoomControls.classList.remove('hidden');
 
-                        // Add an event listener to apply the zoom level when the slider is moved.
                         zoomSlider.addEventListener('input', (event) => {
                             const zoomValue = parseFloat(event.target.value);
                             track.applyConstraints({ advanced: [{ zoom: zoomValue }] })
                                 .catch(e => console.error("Error applying zoom:", e));
                         });
-                    } else {
-                        console.log("Zoom not supported on this camera.");
                     }
-                }, 500); // 500ms delay to allow the video element to initialize
+                }, 500);
             } catch (e) {
                 console.error("Zoom setup failed:", e);
             }
         }
 
-        // Handle QR code from an uploaded image file
         function handleFileUpload(event) {
             const file = event.target.files[0];
             if (file) {
@@ -805,7 +785,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        // Send uploaded image to the server for decoding
         async function decodeImageOnServer(imageDataUrl) {
             try {
                 const response = await fetch('/decode-qr', {
@@ -828,7 +807,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        // Use the text pasted directly into the input field
         function usePastedText() {
             const qrText = qrTextInput.value.trim();
             if (qrText) {
@@ -841,7 +819,6 @@ HTML_TEMPLATE = """
 
         // --- Final Attendance Process ---
 
-        // Show the confirmation screen with the decoded ID
         function showConfirmationScreen() {
             if (students.length === 0) {
                 alert("Please add at least one student before marking attendance.");
@@ -852,7 +829,6 @@ HTML_TEMPLATE = """
             decodedIdDiv.textContent = decodedAttendanceId;
         }
 
-        // Send data to the server to mark attendance for all students
         async function runAttendanceProcess() {
             showView(resultsView);
             resultsLoader.classList.remove('hidden');
@@ -869,11 +845,9 @@ HTML_TEMPLATE = """
                 });
                 const result = await response.json();
 
-                // Hide loader and show results content
                 resultsLoader.classList.add('hidden');
                 resultsContent.classList.remove('hidden');
 
-                // Populate the results table
                 resultsTableBody.innerHTML = '';
                 result.table_data.forEach(item => {
                     const statusClass = item.status === 'Success' ? 'status-success' : 'status-failed';
@@ -885,7 +859,6 @@ HTML_TEMPLATE = """
                     resultsTableBody.innerHTML += row;
                 });
 
-                // Display the raw logs
                 resultsLogDiv.textContent = result.logs.join('\\n');
 
             } catch (error) {
