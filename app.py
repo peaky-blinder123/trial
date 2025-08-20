@@ -7,18 +7,29 @@ import base64
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
 import logging
 import re
+import os # <-- Required for reading environment variables
 
 # Suppress unnecessary Flask logging to keep the console clean
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
-# A secret key is required for session management. Change this to a random string.
-app.secret_key = 'your_very_secret_and_random_key_12345'
 
-# The required password to access the application.
-# IMPORTANT: Change this password for security!
-APP_PASSWORD = "z8!qW-bK$v-x#7sE-j9@Lp-f3^aY-c5&uI-p2*oT-m6(rZ-h1)gN-v4}eX-k0{dC-w7[eS-t8]fB-n9;qA-r2:pD-g5<uF-s3>vG-a1,yH-b4.zJ-c6?iKujshdbcjuhudywegaibvx"
+# =============================================================================
+# SECRETS MANAGEMENT (Production Ready)
+# =============================================================================
+# For security, the Flask Secret Key is read from an environment variable.
+# On Render, you MUST set a variable with the Key: FLASK_SECRET_KEY
+# The string below is a fallback for local testing ONLY.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_default_secret_for_local_development_only')
+
+# The application password is also read from an environment variable.
+# On Render, you MUST set a variable with the Key: APP_PASSWORD
+# The string below is a fallback for local testing ONLY.
+APP_PASSWORD = os.environ.get(
+    'APP_PASSWORD',
+    "z8!qW-bK$v-x#7sE-j9@Lp-f3^aY-c5&uI-p2*oT-m6(rZ-h1)gN-v4}eX-k0{dC-w7[eS-t8]fB-n9;qA-r2:pD-g5<uF-s3>vG-a1,yH-b4.zJ-c6?kjacnjkabvcjwdvs-?jsaM-;scjxn"
+)
 
 # =============================================================================
 # CORE ATTENDANCE LOGIC (Unchanged)
