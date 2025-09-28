@@ -159,7 +159,7 @@ def run_attendance_for_all(attendance_id, students):
         thread = threading.Thread(target=process_student, args=(student, attendance_id, output_log))
         threads.append(thread)
         thread.start()
-        time.sleep(random.uniform(0.4, 0.7))
+        time.sleep(random.uniform(0.2, 0.5))
     for thread in threads:
         thread.join()
     table_data = parse_logs_for_table(output_log, students)
